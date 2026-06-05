@@ -1,0 +1,6 @@
+{
+  "name": "PlotTwist",
+  "description": "An AI-powered social storytelling platform where every user becomes the protagonist of their own personalized TV-series universe with dynamic episodic narrations, relations memory, and dramatic cliffhangers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

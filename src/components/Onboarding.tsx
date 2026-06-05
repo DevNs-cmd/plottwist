@@ -1,0 +1,454 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState } from 'react';
+import { motion } from 'motion/react';
+import { Sparkles, User, Shield, Target, Heart, Briefcase, Zap, Clapperboard, Globe } from 'lucide-react';
+import { UserProfile } from '../types';
+
+interface OnboardingProps {
+  onComplete: (profile: UserProfile, startingEpisode: any, initialCharacters: any[]) => void;
+  isLoading: boolean;
+  setIsLoading: (val: boolean) => void;
+}
+
+const INTERESTS_OPTIONS = [
+  "Corporate Intrigue", "High Society", "Underground Combat", 
+  "Fashion & Models", "Cybersec Hacktivism", "Art & Seduction",
+  "Street Racing", "Political Manipulation", "Ancient Mysteries"
+];
+
+const TRAIT_OPTIONS = [
+  "Calculative", "Impulsive", "Seductive", "Empathetic", 
+  "Secretive", "Brave", "Cynical", "Highly Analytical"
+];
+
+const UNIVERSES = [
+  { id: "Original", name: "Original Reality", desc: "Realistic modern high-stakes drama", emoji: "🏙️" },
+  { id: "Billionaire", name: "Billionaire Success", desc: "Private jets, hostile takeovers, yacht alliances", emoji: "💎" },
+  { id: "Celebrity", name: "Hollywood Stardom", desc: "Paparazzi, hidden affairs, red carpet secrets", emoji: "🎬" },
+  { id: "Founder", name: "Tech Unicorn Founder", desc: "Silicon Valley betrayal, VC wars, stealth tech", emoji: "🦄" }
+];
+
+export default function Onboarding({ onComplete, isLoading, setIsLoading }: OnboardingProps) {
+  const [step, setStep] = useState(1);
+  const [name, setName] = useState('');
+  const [age, setAge] = useState(24);
+  const [interests, setInterests] = useState<string[]>([]);
+  const [personalityTraits, setPersonalityTraits] = useState<string[]>([]);
+  const [goals, setGoals] = useState('');
+  const [relationshipPreferences, setRelationshipPreferences] = useState('Rivalry & Friction');
+  const [careerStatus, setCareerStatus] = useState('');
+  const [selectedUniverse, setSelectedUniverse] = useState('Original');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [loadingStepText, setLoadingStepText] = useState('Analyzing Profile Files...');
+
+  const toggleInterest = (interest: string) => {
+    setInterests(prev => 
+      prev.includes(interest) ? prev.filter(i => i !== interest) : [...prev, interest]
+    );
+  };
+
+  const toggleTrait = (trait: string) => {
+    setPersonalityTraits(prev => 
+      prev.includes(trait) ? prev.filter(t => t !== trait) : [...prev, trait]
+    );
+  };
+
+  const triggerOnboardAPIByStep = async () => {
+    if (!name.trim()) {
+      setErrorMsg("Please introduce yourself first (Enter a protagonist name).");
+      return;
+    }
+    setErrorMsg('');
+    setIsLoading(true);
+
+    const stepTexts = [
+      "Securing satellite uplinks...",
+      "Weaving rival networks...",
+      "Drafting betrayal formulas...",
+      "Generating Pilot Episode..."
+    ];
+
+    let currentTextIdx = 0;
+    const interval = setInterval(() => {
+      if (currentTextIdx < stepTexts.length) {
+        setLoadingStepText(stepTexts[currentTextIdx]);
+        currentTextIdx++;
+      }
+    }, 1500);
+
+    try {
+      const response = await fetch('/api/onboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          age,
+          interests,
+          personalityTraits,
+          goals: goals || "Achieve status and protect loved ones from a mysterious threat.",
+          relationshipPreferences,
+          careerStatus: careerStatus || "Ambitious newcomer",
+          activeUniverse: selectedUniverse
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text() || "Failed to contact Showrunner.");
+      }
+
+      const data = await response.json();
+      clearInterval(interval);
+      
+      const profile: UserProfile = {
+        name,
+        age,
+        interests,
+        personalityTraits,
+        goals: goals || "Achieve status",
+        relationshipPreferences,
+        careerStatus: careerStatus || "Ambitious newcomer",
+        avatarUrl: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${name}`,
+        summary: data.summary
+      };
+
+      onComplete(profile, data.firstEpisode, data.characters);
+    } catch (err: any) {
+      clearInterval(interval);
+      console.error(err);
+      setErrorMsg(err.message || "Something went wrong during onboarding.");
+      setIsLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div id="onboarding_loader" className="fixed inset-0 bg-black flex flex-col items-center justify-center text-white z-55 px-6">
+        <motion.div
+          animate={{ scale: [1, 1.1, 1], rotate: [0, 10, -10, 0] }}
+          transition={{ duration: 4, repeat: Infinity }}
+          className="relative mb-8"
+        >
+          <Clapperboard className="w-20 h-20 text-red-500 stroke-[1.5]" />
+          <div className="absolute -inset-2 rounded-full border border-dashed border-red-500/40 animate-spin" style={{ animationDuration: '10s' }} />
+        </motion.div>
+        
+        <h2 className="text-3xl font-display font-black tracking-widest text-center text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-purple-400 to-amber-500 mb-2">
+          PLOTTWIST ORIGINAL
+        </h2>
+        
+        <p className="font-mono text-sm tracking-widest text-zinc-400 animate-pulse text-center mb-10 max-w-md h-6">
+          {loadingStepText}
+        </p>
+
+        <div className="w-64 h-1 bg-zinc-900 rounded-full overflow-hidden">
+          <motion.div 
+            initial={{ width: 0 }}
+            animate={{ width: "100%" }}
+            transition={{ duration: 6, ease: "easeInOut" }}
+            className="h-full bg-gradient-to-r from-red-600 to-purple-600"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-xl mx-auto py-12 px-4" id="onboarding_wizard">
+      <div className="text-center mb-10">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="inline-flex items-center gap-2 bg-red-500/10 text-red-400 px-4 py-1.5 rounded-full text-xs font-mono tracking-widest uppercase border border-red-500/20 mb-4"
+        >
+          <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+          Season 1 Onboarding
+        </motion.div>
+        
+        <h1 className="text-5xl font-display font-black tracking-tight text-white mb-2 leading-none">
+          Plot<span className="text-red-500">Twist</span>
+        </h1>
+        <p className="text-sm font-sans text-zinc-400 max-w-sm mx-auto">
+          Draft your profile to generate a customized, narrative universe of love, rivalry, and sudden betrayal.
+        </p>
+      </div>
+
+      <div className="card-backdrop-glass rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden glow-ambient">
+        <div id="step_indicator" className="flex items-center justify-between mb-8 pb-4 border-b border-zinc-800/80">
+          <span className="font-mono text-xs tracking-wider text-zinc-500">STEP {step} / 5</span>
+          <div className="flex gap-1.5">
+            {[1, 2, 3, 4, 5].map((s) => (
+              <div 
+                key={s} 
+                className={`w-3.5 h-1.5 rounded-full transition-all duration-300 ${
+                  s === step ? 'bg-red-500 w-6' : s < step ? 'bg-purple-600' : 'bg-zinc-800'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+
+        {errorMsg && (
+          <div id="onboard_error" className="mb-6">
+            {(errorMsg.toLowerCase().includes('leaked') || errorMsg.includes('403') || errorMsg.toLowerCase().includes('permission_denied') || errorMsg.toLowerCase().includes('api key')) ? (
+              <div className="bg-red-950/40 border border-red-500/50 rounded-2xl p-5 text-sm space-y-4 shadow-xl">
+                <div className="flex items-center gap-2 text-red-500 font-bold font-mono text-xs uppercase tracking-widest">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping inline-block" />
+                  API Authorization Failure
+                </div>
+                <p className="text-zinc-200 text-xs leading-relaxed">
+                  The application is unable to authenticate with Gemini. Your <code className="bg-zinc-900 border border-zinc-800 px-1 py-0.5 rounded text-red-400 font-mono">GEMINI_API_KEY</code> is reported as leaked, invalid, or returned a 403 Forbidden status.
+                </p>
+                <div className="bg-zinc-950/60 p-3.5 rounded-xl border border-zinc-900 space-y-1.5 text-[11px] leading-relaxed text-zinc-400">
+                  <div className="font-bold text-zinc-300 font-mono text-[9px] uppercase tracking-wider">How to resolve this:</div>
+                  <ol className="list-decimal pl-4 space-y-1">
+                    <li>Create or grab a new API key in <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-red-400 underline hover:text-red-300 cursor-pointer">Google AI Studio API Keys</a>.</li>
+                    <li>Access your app's **Secrets Panel** on Google AI Studio.</li>
+                    <li>Update your <code className="text-red-400">GEMINI_API_KEY</code> variable with your new key.</li>
+                  </ol>
+                </div>
+                <div className="text-[10px] text-zinc-500 font-mono">
+                  Error Details: <span className="text-zinc-400">{errorMsg}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3.5 text-xs text-red-400 font-mono">
+                {errorMsg}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* STEP 1: Core ID */}
+        {step === 1 && (
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+            <h3 className="text-lg font-display font-bold text-white mb-4 flex items-center gap-2">
+              <User className="w-5 h-5 text-zinc-400" /> Enter Protagonist Coordinates
+            </h3>
+            <div className="space-y-5">
+              <div>
+                <label className="block text-xs font-mono text-zinc-500 tracking-wider uppercase mb-2">My Character Name</label>
+                <input 
+                  type="text" 
+                  value={name} 
+                  onChange={(e) => setName(e.target.value)} 
+                  placeholder="e.g. Liam Vance, Celeste Fox" 
+                  maxLength={32}
+                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-red-500 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:outline-none transition-all font-sans text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-zinc-500 tracking-wider uppercase mb-2">Age: {age}</label>
+                <input 
+                  type="range" 
+                  min={18} 
+                  max={60} 
+                  value={age} 
+                  onChange={(e) => setAge(parseInt(e.target.value))}
+                  className="w-full accent-red-500 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+                />
+                <div className="flex justify-between text-[10px] font-mono text-zinc-600 mt-1">
+                  <span>18</span>
+                  <span>Adult Protagonist</span>
+                  <span>60</span>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* STEP 2: Interests & Drama Environment */}
+        {step === 2 && (
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+            <h3 className="text-lg font-display font-bold text-white mb-2 flex items-center gap-2">
+              <Shield className="w-5 h-5 text-zinc-400" /> Plot Context & Interests
+            </h3>
+            <p className="text-xs text-zinc-500 mb-5">Select 2-4 fields to fuel your episodic scenarios.</p>
+
+            <div className="grid grid-cols-2 gap-2">
+              {INTERESTS_OPTIONS.map((interest) => {
+                const active = interests.includes(interest);
+                return (
+                  <button
+                    key={interest}
+                    type="button"
+                    onClick={() => toggleInterest(interest)}
+                    className={`px-3 py-2.5 rounded-xl border text-xs font-medium text-left transition-all ${
+                      active 
+                        ? 'bg-purple-950/40 border-purple-500/60 text-purple-200 shadow-md shadow-purple-500/5' 
+                        : 'bg-zinc-900/60 border-zinc-800/80 text-zinc-400 hover:border-zinc-700'
+                    }`}
+                  >
+                    {interest}
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+
+        {/* STEP 3: Personality Profile */}
+        {step === 3 && (
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+            <h3 className="text-lg font-display font-bold text-white mb-2 flex items-center gap-2">
+              <Zap className="w-5 h-5 text-zinc-400" /> Personality Matrix
+            </h3>
+            <p className="text-xs text-zinc-500 mb-5">Choose traits representing your tactical defaults.</p>
+
+            <div className="grid grid-cols-2 gap-2">
+              {TRAIT_OPTIONS.map((trait) => {
+                const active = personalityTraits.includes(trait);
+                return (
+                  <button
+                    key={trait}
+                    type="button"
+                    onClick={() => toggleTrait(trait)}
+                    className={`px-3 py-2.5 rounded-xl border text-xs font-medium text-left transition-all ${
+                      active 
+                        ? 'bg-red-950/40 border-red-500/60 text-red-200 shadow-md shadow-red-500/5' 
+                        : 'bg-zinc-900/60 border-zinc-800/80 text-zinc-400 hover:border-zinc-700'
+                    }`}
+                  >
+                    {trait}
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+
+        {/* STEP 4: Goals, Status and Romance Style */}
+        {step === 4 && (
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+            <h3 className="text-lg font-display font-bold text-white mb-5 flex items-center gap-2">
+              <Target className="w-5 h-5 text-zinc-400" /> Story Motivations
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-mono text-zinc-500 tracking-wider uppercase mb-1.5 flex items-center gap-1.5">
+                  <Briefcase className="w-3.5 h-3.5" /> Career Status or Secret Ambition
+                </label>
+                <input 
+                  type="text" 
+                  value={careerStatus} 
+                  onChange={(e) => setCareerStatus(e.target.value)} 
+                  placeholder="e.g. Undercover Agent, Rogue Investigator, Disgraced CFO" 
+                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-red-500 rounded-xl px-3 py-2.5 text-white placeholder-zinc-700 focus:outline-none text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-zinc-500 tracking-wider uppercase mb-1.5 flex items-center gap-1.5">
+                  <Target className="w-3.5 h-3.5" /> Core Obsession / Master Goal
+                </label>
+                <input 
+                  type="text" 
+                  value={goals} 
+                  onChange={(e) => setGoals(e.target.value)} 
+                  placeholder="e.g. Find the syndicate that framed my father" 
+                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-red-500 rounded-xl px-3 py-2.5 text-white placeholder-zinc-700 focus:outline-none text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-zinc-500 tracking-wider uppercase mb-1.5 flex items-center gap-1.5">
+                  <Heart className="w-3.5 h-3.5" /> Romantic Chemistry Preference
+                </label>
+                <select 
+                  value={relationshipPreferences} 
+                  onChange={(e) => setRelationshipPreferences(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-red-500 rounded-xl px-3 py-2.5 text-white focus:outline-none text-xs cursor-pointer"
+                >
+                  <option value="Forbidden Love / Bitter Rivals">Forbidden Love / Intense Rivals</option>
+                  <option value="Slow-burn Partnership / Mutual Care">Partner in Crime / Trust Builder</option>
+                  <option value="Playful Flirting & High Society Charm">Playful Flirting & Society Alliances</option>
+                  <option value="Love Triangle / Chaotic Secrets">Love Triangle / High Society Drama</option>
+                </select>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* STEP 5: Parallel Universe Timeline Mode */}
+        {step === 5 && (
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+            <h3 className="text-lg font-display font-bold text-white mb-2 flex items-center gap-2">
+              <Globe className="w-5 h-5 text-amber-500" /> Choose Story Universe Mode
+            </h3>
+            <p className="text-xs text-zinc-500 mb-5">
+              Select your protagonist timeline. The AI will weave narrative vectors matching this exact aesthetic!
+            </p>
+
+            <div className="space-y-2">
+              {UNIVERSES.map((univ) => {
+                const active = selectedUniverse === univ.id;
+                return (
+                  <button
+                    key={univ.id}
+                    type="button"
+                    onClick={() => setSelectedUniverse(univ.id)}
+                    className={`w-full text-left p-3.5 rounded-2xl border transition-all ${
+                      active
+                        ? 'bg-amber-950/25 border-amber-500/50 shadow-md shadow-amber-500/5'
+                        : 'bg-zinc-900/40 border-zinc-900 text-zinc-400 hover:border-zinc-800'
+                    }`}
+                  >
+                    <div className="flex gap-3">
+                      <span className="text-2xl">{univ.emoji}</span>
+                      <div>
+                        <div className="text-xs font-bold text-white">{univ.name}</div>
+                        <div className="text-[11px] text-zinc-500">{univ.desc}</div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+
+        {/* BUTTON ACTION MATRIX */}
+        <div className="flex justify-between mt-10" id="onboard_action_tier">
+          {step > 1 ? (
+            <button
+              type="button"
+              onClick={() => setStep(prev => prev - 1)}
+              className="px-5 py-2.5 rounded-xl border border-zinc-800 text-xs font-mono text-zinc-400 hover:bg-zinc-900 hover:text-white transition-all"
+            >
+              Back
+            </button>
+          ) : (
+            <div />
+          )}
+
+          {step < 5 ? (
+            <button
+              type="button"
+              disabled={step === 1 && !name.trim()}
+              onClick={() => {
+                if (step === 1 && !name.trim()) return;
+                setStep(prev => prev + 1);
+              }}
+              className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-mono text-white tracking-widest uppercase transition-all shadow-lg shadow-purple-600/10 hover:shadow-purple-500/15"
+            >
+              Continue
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={triggerOnboardAPIByStep}
+              className="px-8 py-3 rounded-xl bg-gradient-to-r from-red-600 via-purple-600 to-amber-500 text-white font-display font-black text-xs uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-xl shadow-purple-900/30 glow-ambient"
+            >
+              Generate Pilot Episode 🎬
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

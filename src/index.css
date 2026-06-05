@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,700;1,700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-display: "Playfair Display", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  background-color: #020203;
+  color: #f4f4f5;
+  font-family: var(--font-sans);
+}
+
+/* Sophisticated Dark styling utilities */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.episode-gradient {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(2, 2, 3, 1) 90%);
+}
+
+.glow-red {
+  box-shadow: 0 0 20px rgba(229, 9, 20, 0.2);
+}
+
+.netflix-bg-gradient {
+  background: radial-gradient(circle at top center, rgba(229, 9, 20, 0.1) 0%, rgba(2, 2, 3, 1) 100%);
+}
+
+.card-backdrop-glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.card-backdrop-glass-premium {
+  background: rgba(234, 179, 8, 0.03);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(234, 179, 8, 0.15);
+}
+
+/* Smooth custom pulse animation for visual tension */
+@keyframes neon-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(229, 9, 20, 0.2), 0 0 15px rgba(229, 9, 20, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(229, 9, 20, 0.45), 0 0 35px rgba(229, 9, 20, 0.25);
+  }
+}
+
+.glow-ambient {
+  animation: neon-glow 6s infinite;
+}
+
