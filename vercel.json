@@ -3,17 +3,19 @@
   "buildCommand": "npm run build",
   "installCommand": "npm ci",
   "outputDirectory": "dist",
-  "framework": "node",
-  "routes": [
+  "rewrites": [
     {
-      "src": "/(.*)$",
-      "dest": "/$1"
+      "source": "/api/:path*",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/$1"
     }
   ],
   "functions": {
-    "api/**/*.js": {
+    "api/**/*.ts": {
       "runtime": "nodejs20.x"
     }
   }
 }
-
