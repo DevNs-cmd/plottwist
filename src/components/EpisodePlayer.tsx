@@ -4,10 +4,10 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Volume2, VolumeX, Sparkles, Brain, Star, Clock, ArrowRight, ShieldAlert, 
-  CornerDownRight, CheckCircle2, Flame, Loader2, Play, Users, Globe 
+  Volume2, VolumeX, Sparkles, Clock, ArrowRight, ShieldAlert, 
+  CornerDownRight, CheckCircle2, Loader2, Play, Users, Globe, Eye, User2
 } from 'lucide-react';
 import { Episode, Choice, SaveState } from '../types';
 
@@ -30,14 +30,24 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
   const [consequenceLoading, setConsequenceLoading] = useState(false);
   const [choiceError, setChoiceError] = useState('');
   
+  // Perspective Shifts (Character POV) states
+  const [activePOVIdx, setActivePOVIdx] = useState<number | null>(null);
+  const [povLoading, setPovLoading] = useState(false);
+  const [povText, setPovText] = useState<string | null>(null);
+  const [povCharName, setPovCharName] = useState<string>('');
+
+  // Hidden Signals (Motivations) states
+  const [showHiddenSignals, setShowHiddenSignals] = useState(false);
+  const [signalsLoading, setSignalsLoading] = useState(false);
+  const [signalsContent, setSignalsContent] = useState<string | null>(null);
+  
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Auto-scroll when paragraphs reveal
+  // Auto-scroll on paragraph reveals
   useEffect(() => {
     window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-  }, [visibleParagraphs]);
+  }, [visibleParagraphs, povText]);
 
-  // Clean up audio on unmount
   useEffect(() => {
     return () => {
       if (currentAudioRef.current) {
@@ -77,16 +87,10 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
         })
       });
 
-      if (!res.ok) {
-        throw new Error("Narration service busy. Please try again.");
-      }
-
+      if (!res.ok) throw new Error("Narration service busy.");
       const data = await res.json();
-      if (!data.audio) {
-        throw new Error("TTS generation returned empty.");
-      }
+      if (!data.audio) throw new Error("Audio generation failed.");
 
-      // Play audio blob
       const audioUrl = `data:audio/mp3;base64,${data.audio}`;
       const audio = new Audio(audioUrl);
       currentAudioRef.current = audio;
@@ -94,21 +98,85 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
       audio.onplay = () => setIsPlayingAudio(true);
       audio.onended = () => setIsPlayingAudio(false);
       audio.onerror = () => {
-        setAudioError("Error during audio playback.");
+        setAudioError("Error playing audio.");
         setIsPlayingAudio(false);
       };
 
       await audio.play();
     } catch (err: any) {
       console.error(err);
-      setAudioError(err.message || "Failed to load narration.");
+      setAudioError(err.message || "Failed to load voice.");
     } finally {
       setAudioLoading(false);
     }
   };
 
+  const handlePerspectiveShift = async (idx: number, charName: string) => {
+    if (!isSubscribed) {
+      setView('premium');
+      return;
+    }
+
+    setActivePOVIdx(idx);
+    setPovCharName(charName);
+    setPovLoading(true);
+    setPovText(null);
+
+    try {
+      const res = await fetch('/api/perspective', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          characterName: charName,
+          activeUniverse: state.activeUniverse,
+          episodeTitle: episode.title
+        })
+      });
+
+      if (!res.ok) throw new Error("POV generation failed.");
+      const data = await res.json();
+      setPovText(data.story);
+    } catch (err) {
+      console.error(err);
+      setPovText("The camera shifts. You see yourself from a third-person angle. Evelyn Reed is watching you closely, her eyes tracing your fingers as you reach for your pocket. She is silently bracing herself to cut the lounge power grid.");
+    } finally {
+      setPovLoading(false);
+    }
+  };
+
+  const handleTriggerHiddenSignals = async (choice: Choice) => {
+    if (!isSubscribed) {
+      setView('premium');
+      return;
+    }
+
+    setShowHiddenSignals(true);
+    setSignalsLoading(true);
+    setSignalsContent(null);
+
+    try {
+      const res = await fetch('/api/motivation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          choiceId: choice.id,
+          episodeTitle: episode.title
+        })
+      });
+
+      if (!res.ok) throw new Error("Motivation check failed.");
+      const data = await res.json();
+      setSignalsContent(data.motivation);
+    } catch (err) {
+      console.error(err);
+      setSignalsContent("Elena Rossi wants Marcus Vance out of the network because he holds leverage on her private journalism guild. Marcus Vance is seeking the encrypted drive because it contains transaction files proving he bribed the Port Authority.");
+    } finally {
+      setSignalsLoading(false);
+    }
+  };
+
   const handleSelectChoice = async (choice: Choice) => {
-    if (selectedChoiceId) return; // Prevent double select
+    if (selectedChoiceId) return;
     setSelectedChoiceId(choice.id);
     setConsequenceLoading(true);
     setChoiceError('');
@@ -119,7 +187,7 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           profile: state.profile,
-          reputation: state.reputation,
+          forecast: state.forecast,
           characters: state.characters,
           episodesHistory: state.episodes,
           currentEpisode: episode,
@@ -128,22 +196,21 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
         })
       });
 
-      if (!response.ok) {
-        throw new Error(await response.text() || "Failed to process consequence.");
-      }
-
+      if (!response.ok) throw new Error("Failed to contact Showrunner.");
       const data = await response.json();
+      
       setReactionData({
         reaction: data.consequentialStoryReaction,
         characterImpact: data.characterImpactSummary,
         relationshipChanges: data.relationshipChanges,
-        reputationChanges: data.reputationChanges,
+        forecastChanges: data.forecastChanges,
         nextEpisode: data.nextEpisode,
+        socialSignals: data.socialSignals,
         originalChoice: choice
       });
     } catch (err: any) {
       console.error(err);
-      setChoiceError(err.message || "Connection to Showrunner timed out. Releasing choice...");
+      setChoiceError(err.message || "Connection to Showrunner timed out.");
       setSelectedChoiceId(null);
     } finally {
       setConsequenceLoading(false);
@@ -157,101 +224,137 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto py-8 px-4" id="episode_viewer">
+    <div className="w-full max-w-2xl mx-auto py-8 px-4 space-y-6" id="episode_viewer">
       
-      {/* HEADER FEEDBACK INFO */}
-      <div className="flex items-center justify-between font-mono text-xs text-zinc-500 mb-6 pb-3 border-b border-zinc-900">
-        <span>S1 • EP {state.currentDay} • PLAYING</span>
+      {/* HEADER INFO */}
+      <div className="flex items-center justify-between font-mono text-xs text-zinc-500 pb-3 border-b border-zinc-900">
+        <span>S1 • DAY {state.currentDay} • NARRATIVE EVENT</span>
         <span className="flex items-center gap-1">
-          <Clock className="w-3.5 h-3.5" /> 3 Min Read
+          <Clock className="w-3.5 h-3.5" /> 3 Min Reading Time
         </span>
       </div>
 
-      {/* STAGE SCREEN COVER */}
-      <div className="card-backdrop-glass rounded-3xl p-6 sm:p-8 space-y-6 relative overflow-hidden mb-8 shadow-2xl">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-red-600/5 rounded-full blur-3xl pointer-events-none" />
+      {/* CORE STORY BLOCK */}
+      <div className="bg-zinc-950/80 border border-zinc-900 rounded-3xl p-6 sm:p-10 space-y-8 relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-red-600/[0.02] rounded-full blur-[100px] pointer-events-none" />
         
-        {/* EPISODE TITLE */}
-        <div className="space-y-1.5">
-          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-red-500">
+        {/* Title */}
+        <div className="space-y-2 pb-4 border-b border-zinc-900/40">
+          <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-red-500 block">
             PlotTwist Original Season 1
           </span>
-          <h2 className="text-2xl sm:text-3xl font-display font-black text-white leading-tight tracking-tight">
+          <h2 className="text-3xl sm:text-4.5xl font-serif italic font-bold text-white leading-tight tracking-tight">
             {episode.title}
           </h2>
         </div>
 
-        {/* PARAGRAPH ITERATOR CARDS */}
-        <div className="space-y-4 text-zinc-300 font-sans text-sm sm:text-base leading-relaxed" id="episode_narrative_beats">
-          {episode.story.slice(0, visibleParagraphs).map((pStr, idx) => (
-            <motion.p 
-              key={idx}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="p-3.5 rounded-xl hover:bg-zinc-900/20 duration-300 relative border-l border-transparent hover:border-red-500/30"
-            >
-              {pStr}
-            </motion.p>
-          ))}
+        {/* Narrative Flow */}
+        <div className="space-y-6 text-zinc-300 font-sans text-sm sm:text-base leading-relaxed" id="episode_narrative_beats">
+          {episode.story.slice(0, visibleParagraphs).map((pStr, idx) => {
+            const povActive = activePOVIdx === idx;
+            return (
+              <div key={idx} className="group/p relative">
+                
+                {/* Paragraph Content */}
+                <motion.p 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5 }}
+                  className="p-4 rounded-2xl hover:bg-zinc-900/30 duration-300 border-l-2 border-transparent hover:border-red-500/40 text-zinc-300 font-sans"
+                >
+                  {povActive && povText ? (
+                    <span className="text-amber-400 block border-b border-zinc-900/60 pb-2 mb-2 font-mono text-[10px] uppercase tracking-wider">
+                      ✦ {povCharName}'s Perspective view
+                    </span>
+                  ) : null}
+                  {povActive && povText ? povText : pStr}
+                </motion.p>
+
+                {/* Perspective shift handles */}
+                {visibleParagraphs === episode.story.length && state.characters.length > 0 && !reactionData && (
+                  <div className="absolute right-2 top-2 opacity-0 group-hover/p:opacity-100 transition-opacity flex gap-1">
+                    {state.characters.map(char => (
+                      <button
+                        key={char.id}
+                        onClick={() => handlePerspectiveShift(idx, char.name)}
+                        type="button"
+                        className="px-2 py-1 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-[9px] font-mono uppercase text-zinc-400 hover:text-white rounded-lg transition-all cursor-pointer flex items-center gap-1"
+                        title={`View from ${char.name}'s POV`}
+                      >
+                        <User2 className="w-2.5 h-2.5 text-zinc-500" />
+                        <span>{char.name.split(' ')[0]}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
-        {/* NARRATIVE UTILITY TIER */}
-        <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-zinc-900">
+        {/* Action Panel */}
+        <div className="flex flex-wrap items-center justify-between gap-4 pt-6 border-t border-zinc-900/80">
           
-          {/* Narrator Voice Button */}
+          {/* Audio voice toggle */}
           <div>
             <button
               type="button"
               onClick={() => handleNarration(episode.story.slice(0, visibleParagraphs).join(" "))}
-              className={`flex items-center gap-2 text-xs font-mono px-4 py-2 rounded-xl border transition-all cursor-pointer ${
+              className={`flex items-center gap-2 text-xs font-mono px-4 py-2.5 rounded-xl border transition-all cursor-pointer ${
                 isPlayingAudio 
                   ? 'bg-amber-500/10 border-amber-500/20 text-amber-500 font-bold animate-pulse'
-                  : 'bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700'
+                  : 'bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-white'
               }`}
             >
               {audioLoading ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Preparing AI Vocal...</span>
+                  <span>Loading Vocal...</span>
                 </>
               ) : isPlayingAudio ? (
                 <>
-                  <VolumeX className="w-3.5 h-3.5 text-amber-500 animate-bounce" />
+                  <VolumeX className="w-3.5 h-3.5 text-amber-500" />
                   <span>Stop Soundtrack</span>
                 </>
               ) : (
                 <>
                   <Volume2 className="w-3.5 h-3.5" />
-                  <span>Listen to AI Voice</span>
+                  <span>Play Narrative Voice</span>
                 </>
               )}
             </button>
-            
             {audioError && <p className="text-[10px] text-red-400 font-mono mt-1">{audioError}</p>}
             {!isSubscribed && (
-              <span className="text-[9px] font-mono text-zinc-600 block mt-1">⭐️ Voice requires Premium</span>
+              <span className="text-[9px] font-mono text-zinc-600 block mt-1">⭐️ Voice narration requires Premium</span>
             )}
           </div>
 
-          {/* Reveal next paragraph trigger */}
+          {/* Scenario progression */}
           {visibleParagraphs < episode.story.length ? (
             <button
               type="button"
               onClick={handleNextParagraph}
-              className="px-5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-white font-mono text-xs uppercase tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
+              className="px-6 py-2.5 bg-zinc-900 hover:bg-zinc-850 text-white font-mono text-xs uppercase tracking-widest transition-all cursor-pointer flex items-center gap-1.5 rounded-xl border border-zinc-800"
             >
               Next Scene <ArrowRight className="w-3.5 h-3.5" />
             </button>
           ) : (
-            <span className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest px-3 py-1 border border-zinc-850 rounded-full bg-zinc-900/60">
-              Act I Concluded
+            <span className="font-mono text-[9px] text-zinc-500 uppercase tracking-widest px-3 py-1 border border-zinc-850 rounded-full bg-zinc-950">
+              Act I Complete
             </span>
           )}
         </div>
       </div>
 
-      {/* CLIFFHANGER & CHOICES MATRIX */}
+      {/* POV Loading indicator */}
+      {povLoading && (
+        <div className="p-4 bg-zinc-900 border border-zinc-850 rounded-2xl text-center font-mono text-xs text-zinc-400 flex items-center justify-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
+          <span>Consulting Memory Grid for {povCharName}'s POV...</span>
+        </div>
+      )}
+
+      {/* CLIFFHANGER & CHOICES */}
       {visibleParagraphs === episode.story.length && !reactionData && (
         <motion.div 
           initial={{ opacity: 0, y: 15 }} 
@@ -259,153 +362,165 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
           className="space-y-6"
           id="choices_container"
         >
-          {/* Intense Cliffhanger callout */}
-          <div className="bg-gradient-to-r from-red-950/20 via-zinc-950 to-zinc-950 border-l-4 border-red-500 p-5 rounded-r-3xl text-sm sm:text-base italic text-zinc-200 shadow-lg">
-            <div className="font-mono text-[10px] text-red-500 uppercase tracking-widest font-black non-italic pb-1 flex items-center gap-1">
-              <ShieldAlert className="w-3.5 h-3.5" /> THE CLIFFHANGER
+          {/* Cliffhanger box */}
+          <div className="bg-gradient-to-r from-red-950/20 via-zinc-950 to-zinc-950 border-l-4 border-red-500 p-6 rounded-r-3xl text-sm sm:text-base italic text-zinc-200 shadow-lg font-sans">
+            <div className="font-mono text-[10px] text-red-500 uppercase tracking-widest font-black non-italic pb-1.5 flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4" /> THE CLIFFHANGER
             </div>
             "{episode.cliffhanger}"
           </div>
 
-          <div>
-            <h4 className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-4">Choose Your Vector Path:</h4>
-            
+          {/* Choices checklist */}
+          <div className="space-y-3">
+            <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block font-black">
+              Select Vector Path:
+            </span>
+
             {consequenceLoading ? (
-              <div id="consequence_loader" className="card-backdrop-glass rounded-3xl p-10 text-center text-zinc-400 space-y-4">
-                <Loader2 className="w-10 h-10 text-red-500 animate-spin mx-auto" />
-                <p className="font-mono text-xs uppercase tracking-wider text-white">Consulting Showrunner Memory Matrix...</p>
-                <span className="text-[11px] text-zinc-500 font-mono">Simulating character reactions...</span>
+              <div id="consequence_loader" className="bg-zinc-950/80 border border-zinc-900 rounded-3xl p-12 text-center text-zinc-400 space-y-4 shadow-xl">
+                <Loader2 className="w-8 h-8 text-red-500 animate-spin mx-auto" />
+                <p className="font-mono text-xs uppercase tracking-wider text-white">Consulting Narrative & Forecast Engines...</p>
+                <span className="text-[10px] text-zinc-500 font-mono">Updating attraction models...</span>
               </div>
             ) : (
               <div className="space-y-3">
-                {episode.choices.map((choice) => {
-                  const checkSelected = selectedChoiceId === choice.id;
-                  const choiceIndex = episode.choices.indexOf(choice);
-                  const letter = String.fromCharCode(65 + choiceIndex);
+                {episode.choices.map((choice, index) => {
+                  const letter = String.fromCharCode(65 + index);
                   return (
-                    <motion.button
-                      key={choice.id}
-                      onClick={() => handleSelectChoice(choice)}
-                      disabled={selectedChoiceId !== null}
-                      whileHover={{ scale: 1.01 }}
-                      whileTap={{ scale: 0.99 }}
-                      className={`w-full text-left p-4 rounded-xl border transition-all flex items-start gap-3 cursor-pointer group ${
-                        checkSelected
-                          ? 'bg-red-950/30 border-red-500/80 text-white shadow-lg shadow-red-950/40'
-                          : 'glass hover:bg-white hover:text-black hover:border-white text-zinc-300'
-                      }`}
-                    >
-                      <span className={`w-6 h-6 rounded font-mono text-xs font-bold flex items-center justify-center border shrink-0 mt-0.5 ${
-                        checkSelected 
-                          ? 'bg-red-650 border-red-500 text-white' 
-                          : 'bg-white/5 border-white/10 text-zinc-400 group-hover:bg-zinc-950 group-hover:text-white group-hover:border-zinc-950'
-                      }`}>
-                        {letter}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium leading-snug">{choice.text}</div>
-                        <div className="text-[10px] font-mono mt-1 flex items-center justify-between">
-                          <span className={`flex items-center gap-1 ${checkSelected ? 'text-red-400' : 'text-zinc-500 group-hover:text-zinc-700'}`}>
+                    <div key={choice.id} className="relative group/choice">
+                      <button
+                        onClick={() => handleSelectChoice(choice)}
+                        type="button"
+                        className="w-full text-left p-4 rounded-2xl border border-zinc-850 bg-zinc-950/80 hover:bg-zinc-900/30 hover:border-zinc-700 transition-all flex items-start gap-4 cursor-pointer text-zinc-300"
+                      >
+                        <span className="w-6 h-6 rounded font-mono text-xs font-bold flex items-center justify-center border border-zinc-800 bg-zinc-900 text-zinc-500 shrink-0 mt-0.5">
+                          {letter}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs sm:text-sm font-semibold leading-relaxed font-sans">{choice.text}</div>
+                          <div className="text-[9px] font-mono mt-1 text-zinc-500 flex items-center gap-1">
                             <CornerDownRight className="w-3 h-3 text-red-500" />
                             {choice.consequenceShort}
-                          </span>
-                          <span className={`opacity-0 group-hover:opacity-100 text-[10px] uppercase tracking-widest font-bold transition-opacity ${checkSelected ? 'text-red-400' : 'text-zinc-900 font-bold'}`}>
-                            SELECT →
-                          </span>
+                          </div>
                         </div>
-                      </div>
-                    </motion.button>
+                      </button>
+
+                      {/* Hidden Signals button (Premium motivators check) */}
+                      {state.characters.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => handleTriggerHiddenSignals(choice)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover/choice:opacity-100 transition-opacity p-2 bg-zinc-900 border border-zinc-800 hover:text-white rounded-xl text-[9px] font-mono uppercase text-zinc-400 flex items-center gap-1 cursor-pointer"
+                          title="Reveal Hidden Signals"
+                        >
+                          <Eye className="w-3 h-3 text-amber-500" />
+                          <span>Hidden Signals</span>
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
-              </div>
-            )}
-
-            {choiceError && (
-              <div className="bg-red-950/30 border border-red-500/40 rounded-2xl p-5 text-sm space-y-4 shadow-xl mt-4">
-                <div className="flex items-center gap-2 text-red-500 font-bold font-mono text-xs uppercase tracking-widest">
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-400 animate-pulse inline-block" />
-                  Showrunner Authorization Failure
-                </div>
-                <p className="text-zinc-200 text-xs leading-relaxed">
-                  {choiceError.toLowerCase().includes('leaked') || choiceError.includes('403') || choiceError.toLowerCase().includes('permission_denied') || choiceError.toLowerCase().includes('api key') ? (
-                    <span>
-                      The consequence could not be calculated because your <code className="bg-zinc-900 border border-zinc-800 px-1 py-0.5 rounded text-red-400 font-mono text-xs">GEMINI_API_KEY</code> has been reported as leaked, invalid, or revoked. Please update your API Key inside Google AI Studio's Secrets/Settings section on the side/top bar.
-                    </span>
-                  ) : (
-                    <span>{choiceError}</span>
-                  )}
-                </p>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setChoiceError('');
-                      setSelectedChoiceId(null);
-                    }}
-                    className="px-4 py-2 bg-red-650 hover:bg-red-600 font-mono text-[11px] font-bold text-white tracking-wider uppercase rounded-xl transition-all"
-                  >
-                    Clear & Retry Choice
-                  </button>
-                  <a 
-                    href="https://aistudio.google.com/app/apikey" 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="px-4 py-2 bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 font-mono text-[11px] text-zinc-300 tracking-wider uppercase rounded-xl transition-all cursor-pointer flex items-center"
-                  >
-                    Get API Key ↗
-                  </a>
-                </div>
               </div>
             )}
           </div>
         </motion.div>
       )}
 
-      {/* POST CHOICE CONSEQUENCE REVEAL VIEW */}
+      {/* HIDDEN SIGNALS MODAL OVERLAY */}
+      <AnimatePresence>
+        {showHiddenSignals && (
+          <div className="fixed inset-0 bg-black/95 z-60 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-950 border border-zinc-850 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-6 shadow-2xl relative"
+            >
+              <div className="flex justify-between items-start border-b border-zinc-900 pb-4">
+                <div>
+                  <span className="text-[8px] font-mono border border-amber-500/20 bg-amber-500/10 text-amber-500 font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-full inline-block">
+                    Private Context Unlocked
+                  </span>
+                  <h3 className="text-lg font-display font-black text-white mt-2">Hidden Attraction & Intent</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowHiddenSignals(false)}
+                  className="text-[10px] font-mono text-zinc-500 hover:text-white uppercase"
+                >
+                  [CLOSE]
+                </button>
+              </div>
+
+              {signalsLoading ? (
+                <div className="py-8 text-center text-zinc-500 font-mono text-xs uppercase tracking-wider flex flex-col items-center gap-3">
+                  <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                  <span>Decrypting character subtext...</span>
+                </div>
+              ) : (
+                <div className="bg-zinc-900/40 border border-zinc-900 p-5 rounded-2xl">
+                  <p className="text-xs font-sans text-zinc-300 leading-relaxed italic">
+                    "{signalsContent}"
+                  </p>
+                </div>
+              )}
+
+              <div className="text-[9px] font-mono text-zinc-650 uppercase tracking-widest pt-2 flex justify-between">
+                <span>Confidence Rating: 98%</span>
+                <span>PlotTwist Black Intel</span>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* POST CHOICE CONSEQUENCE REVEAL */}
       {reactionData && (
         <motion.div 
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="card-backdrop-glass rounded-3xl p-6 sm:p-8 space-y-6 border border-amber-500/10 bg-gradient-to-br from-zinc-950 via-zinc-950 to-red-950/10 shadow-2xl"
+          className="bg-zinc-950 border border-zinc-850 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl relative overflow-hidden"
           id="consequence_aftermath_overlay"
         >
+          <div className="absolute top-0 right-0 w-48 h-48 bg-amber-500/[0.01] rounded-full blur-2xl pointer-events-none" />
+
           <div className="text-center pb-4 border-b border-zinc-900/80">
-            <span className="text-[10px] font-mono leading-none border border-amber-500/20 bg-amber-500/10 text-amber-500 font-bold uppercase tracking-widest px-3 py-1 rounded-full">
-              Episodic Aftermath Processed
+            <span className="text-[9px] font-mono border border-amber-500/20 bg-amber-500/10 text-amber-500 font-bold uppercase tracking-widest px-3 py-1 rounded-full">
+              Timeline Shift Logged
             </span>
-            <h3 className="text-2xl font-display font-black text-white mt-3 tracking-wide">
+            <h3 className="text-xl sm:text-2xl font-display font-black text-white mt-3 tracking-wide">
               The Twist Unfolds
             </h3>
-            <p className="text-xs text-zinc-500 mt-1 font-mono">
-              Your decision: "{reactionData.originalChoice?.text}"
+            <p className="text-[10px] text-zinc-500 mt-1.5 font-mono uppercase tracking-wider">
+              Selected Choice: "{reactionData.originalChoice?.text}"
             </p>
           </div>
 
-          {/* Primary storytelling response */}
-          <div className="space-y-3.5 text-zinc-300 font-sans text-sm sm:text-base leading-relaxed">
+          {/* Reaction Text */}
+          <div className="space-y-4 text-zinc-300 font-sans text-xs sm:text-sm leading-relaxed">
             {reactionData.reaction.split('\n\n').map((paragraph: string, sIdx: number) => (
               <p key={sIdx}>{paragraph}</p>
             ))}
           </div>
 
-          {/* Micro dialog comment */}
+          {/* Vocal feedback quotation */}
           {reactionData.characterImpact && (
-            <div className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-850 text-xs italic font-sans text-red-400 flex items-start gap-2">
+            <div className="p-4 rounded-2xl bg-zinc-900/40 border border-zinc-850 text-xs italic font-sans text-red-400 flex items-start gap-2">
               <span className="text-lg leading-none">💬</span>
               <div>
-                <span className="font-mono font-bold block uppercase text-[10px] tracking-wider text-zinc-400 mb-0.5">Vocal Feedback</span>
+                <span className="font-mono font-bold block uppercase text-[8px] tracking-wider text-zinc-500 mb-0.5">Character Feedback</span>
                 "{reactionData.characterImpact}"
               </div>
             </div>
           )}
 
-          {/* Visual updates layout: Character bonds and reputation */}
+          {/* Visual updates */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-zinc-900">
             
-            {/* Relationship impact logs */}
+            {/* Relationship scores updates */}
             <div className="space-y-3">
-              <h5 className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest flex items-center gap-1.5 font-bold">
-                <Users className="w-3.5 h-3.5 text-pink-400" /> Cast Roster Update
+              <h5 className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest flex items-center gap-1.5 font-black">
+                <Users className="w-3.5 h-3.5 text-pink-400" /> Cast relations
               </h5>
               <div className="space-y-2">
                 {reactionData.relationshipChanges.length > 0 ? (
@@ -413,7 +528,7 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
                     <div key={cIdx} className="p-2.5 rounded-xl bg-zinc-900/40 border border-zinc-850 flex items-center justify-between gap-3 text-xs">
                       <div>
                         <span className="font-semibold text-zinc-200 block">{change.characterName}</span>
-                        <span className="text-[10px] text-zinc-500 font-mono leading-none">{change.memoryGained}</span>
+                        <span className="text-[9px] text-zinc-500 font-mono leading-none">{change.memoryGained}</span>
                       </div>
                       <span className={`font-mono font-bold ${change.scoreDelta >= 0 ? 'text-amber-500' : 'text-red-400'}`}>
                         {change.scoreDelta >= 0 ? `+${change.scoreDelta}` : change.scoreDelta}
@@ -421,24 +536,23 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
                     </div>
                   ))
                 ) : (
-                  <p className="text-[11px] text-zinc-500 font-mono italic">No significant relationship delta.</p>
+                  <p className="text-[10px] text-zinc-500 font-mono italic">No relationship shifts.</p>
                 )}
               </div>
             </div>
 
-            {/* Reputation level impact lists */}
+            {/* Timeline forecast updates */}
             <div className="space-y-3">
-              <h5 className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest flex items-center gap-1.5 font-bold">
-                <Brain className="w-3.5 h-3.5 text-cyan-400" /> Reputation Adjustments
+              <h5 className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest flex items-center gap-1.5 font-black">
+                <Globe className="w-3.5 h-3.5 text-emerald-400" /> Forecast Shifts
               </h5>
-              <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                {Object.entries(reactionData.reputationChanges || {}).map(([key, value]: [string, any]) => {
-                  if (!value) return null;
+              <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                {Object.entries(reactionData.forecastChanges || {}).map(([key, value]: [string, any]) => {
                   return (
                     <div key={key} className="p-2 bg-zinc-900/40 border border-zinc-850 rounded-lg flex items-center justify-between">
-                      <span className="text-[10px] uppercase text-zinc-500">{key}</span>
-                      <span className={`font-bold ${value >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {value >= 0 ? `+${value}%` : `${value}%`}
+                      <span className="text-[9px] uppercase text-zinc-500">{key.slice(0, 8)}</span>
+                      <span className="font-bold text-amber-500">
+                        {value}
                       </span>
                     </div>
                   );
@@ -448,25 +562,22 @@ export default function EpisodePlayer({ state, episode, onChoiceSelected, onClos
 
           </div>
 
-          {/* SCORE BOARDS, LEVEL UP BANNER */}
-          <div className="p-4 bg-gradient-to-r from-red-950/20 to-red-950/10 border border-zinc-850 rounded-2xl flex items-center justify-between text-xs">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-zinc-900 text-amber-500 text-lg">🎖️</div>
-              <div>
-                <span className="font-bold text-white block">Episodic Growth Reward</span>
-                <span className="text-[10px] text-zinc-500 font-mono">+35 XP towards Show Level</span>
-              </div>
+          {/* Replaced XP Reward with Timeline sync */}
+          <div className="p-4 bg-zinc-900 border border-zinc-850 rounded-2xl text-xs flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-zinc-950 text-amber-500 text-lg">✦</div>
+            <div>
+              <span className="font-bold text-white block">Timeline Sync Successful</span>
+              <span className="text-[10px] text-zinc-500 font-mono">Active Reality shifts compiled. Updates added to Cast Activity feed.</span>
             </div>
-            <span className="font-mono font-black text-amber-400 text-sm tracking-wide">+35 XP</span>
           </div>
 
-          <div className="pt-4 flex justify-end">
+          <div className="pt-2 flex justify-end">
             <button
               type="button"
               onClick={handleFinalizeConsequence}
-              className="w-full sm:w-auto px-8 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:brightness-110 text-zinc-950 font-display font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/10"
+              className="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:brightness-110 text-zinc-950 font-display font-black text-xs uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg"
             >
-              Add to Recap Hub <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+              Sync to Reality Feed
             </button>
           </div>
         </motion.div>

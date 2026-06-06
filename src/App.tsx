@@ -10,69 +10,216 @@ import Dashboard from './components/Dashboard';
 import EpisodePlayer from './components/EpisodePlayer';
 import SubscriptionModal from './components/SubscriptionModal';
 import AdminDashboard from './components/AdminDashboard';
-import { SaveState, UserProfile, Episode, Choice, Character } from './types';
+import { SaveState, UserProfile, Episode, Choice, Character, DirectMessage, CastActivity, RealityVaultItem } from './types';
 import { motion, AnimatePresence } from 'motion/react';
-import { AlertCircle, PlusCircle, CheckCircle, Trophy, Sparkles, Wand2 } from 'lucide-react';
+import { getAvatarUrl } from './utils';
 
-const LOCAL_STORAGE_KEY = 'plottwist_save_state_mvp_v2';
+const LOCAL_STORAGE_KEY = 'plottwist_black_save_state_v1';
 
-const INITIAL_REPUTATION = {
-  charisma: 50,
-  intelligence: 50,
-  mystery: 50,
-  popularity: 50,
-  influence: 50
+const INITIAL_FORECAST = {
+  careerPotential: 'Medium' as const,
+  socialInfluence: 'Medium' as const,
+  relationshipStability: 'Stable' as const,
+  hiddenOpportunity: 'None' as const
+};
+
+const PORTRAIT_MAPPINGS: Record<string, string> = {
+  "Elena Rossi": "/portraits/elena_rossi.png",
+  "Marcus Vance": "/portraits/marcus_vance.png",
+  "Sloane Cross": "/portraits/sloane_cross.png",
+  "Dr. Evelyn Reed": "/portraits/evelyn_reed.png",
+  "VC Brandon Pierce": "/portraits/brandon_pierce.png",
+  "Alfred Check": "/portraits/alfred_check.png"
 };
 
 export default function App() {
   const [state, setState] = useState<SaveState>(() => {
-    // Attempt local storage recall for session consistency
     try {
-      const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+      let stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (!stored) {
+        // Fallback to legacy key to migrate in-progress sessions
+        stored = localStorage.getItem('plottwist_save_state_mvp_v2');
+      }
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed.profile) {
-          return parsed;
+          const sanitizedCharacters = (parsed.characters || []).map((char: any) => {
+            const defaultMetrics = {
+              chemistry: 50,
+              trust: 50,
+              curiosity: 50,
+              closeness: 30,
+              interest: 50,
+              compatibility: 50
+            };
+            const defaultChemistry = {
+              values: ["Truth", "Control"],
+              ambitions: ["Personal sovereignty"],
+              preferences: ["Direct talk"],
+              communicationStyle: "Raw and direct",
+              emotionalTriggers: ["Dishonesty"]
+            };
+
+            return {
+              ...char,
+              archetype: char.archetype || char.role || 'Rival',
+              currentState: char.currentState || 'Neutral',
+              avatarUrl: getAvatarUrl(char.name, char.avatarUrl),
+              attractionMetrics: char.attractionMetrics || defaultMetrics,
+              chemistryProfile: char.chemistryProfile || defaultChemistry
+            };
+          });
+
+          const sanitizedDMs = (parsed.directMessages || []).map((dm: any) => ({
+            ...dm,
+            senderAvatar: getAvatarUrl(dm.senderName, dm.senderAvatar)
+          }));
+
+          const sanitizedActivities = (parsed.castActivities || []).map((act: any) => ({
+            ...act,
+            characterAvatar: getAvatarUrl(act.characterName, act.characterAvatar)
+          }));
+
+          return {
+            currentDay: parsed.currentDay || 1,
+            profile: parsed.profile,
+            characters: sanitizedCharacters,
+            episodes: parsed.episodes || [],
+            currentEpisode: parsed.currentEpisode || null,
+            selectedChoiceId: parsed.selectedChoiceId || null,
+            userChoicesHistory: parsed.userChoicesHistory || {},
+            systemStatus: parsed.systemStatus || 'dashboard',
+            activeUniverse: parsed.activeUniverse || 'Original',
+            plotTwistBlackActive: parsed.plotTwistBlackActive ?? parsed.isSubscribed ?? false,
+            directMessages: sanitizedDMs,
+            castActivities: sanitizedActivities,
+            vaultItems: parsed.vaultItems || [],
+            forecast: parsed.forecast || INITIAL_FORECAST,
+            notifications: parsed.notifications || [],
+            lastOpenedTimestamp: parsed.lastOpenedTimestamp || Date.now()
+          };
         }
       }
     } catch (e) {
-      console.error("Local save state corrupted. Starting from scratch.", e);
+      console.error("Local save state corrupted. Restarting timeline.", e);
     }
 
     return {
       currentDay: 1,
       profile: null,
-      reputation: INITIAL_REPUTATION,
       characters: [],
       episodes: [],
       currentEpisode: null,
       selectedChoiceId: null,
       userChoicesHistory: {},
       systemStatus: 'onboarding',
-      xp: 0,
-      level: 1,
-      streak: 1,
-      lastPlayedDate: null,
+      lastOpenedTimestamp: Date.now(),
+      castActivities: [],
+      directMessages: [],
+      vaultItems: [],
+      forecast: INITIAL_FORECAST,
       activeUniverse: 'Original',
-      isSubscribed: false
+      plotTwistBlackActive: false,
+      notifications: []
     };
   });
 
-  const [activeEmergencyEvent, setActiveEmergencyEvent] = useState<{title: string, info: string, isTriggered: boolean} | null>(null);
-  const [levelUpFanfare, setLevelUpFanfare] = useState<number | null>(null);
-
-  // Sync state mutations to client local storage for durable retention loops
+  // Sync state mutations to client local storage
   useEffect(() => {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  const handleOnboardingComplete = (profile: UserProfile, firstEpisode: Episode, characters: Character[]) => {
+  // mount: Check elapsed time since last opened and trigger Clock Ticks
+  useEffect(() => {
+    if (state.profile && state.lastOpenedTimestamp) {
+      const elapsedHours = Math.floor((Date.now() - state.lastOpenedTimestamp) / (1000 * 60 * 60));
+      if (elapsedHours > 0) {
+        triggerClockTick(elapsedHours);
+      }
+    }
+  }, [state.profile]);
+
+  const triggerClockTick = async (hours: number) => {
+    try {
+      const response = await fetch('/api/clock-tick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          activeUniverse: state.activeUniverse,
+          elapsedHours: hours,
+          characters: state.characters
+        })
+      });
+
+      if (!response.ok) throw new Error("Clock tick failed.");
+      const data = await response.json();
+
+      // Append offline developments and messages
+      setState(prev => {
+        const updatedDMs = [...prev.directMessages];
+        if (data.directMessages && data.directMessages.length > 0) {
+          updatedDMs.unshift(...data.directMessages);
+        }
+
+        const updatedActivities = [...prev.castActivities];
+        if (data.castActivities && data.castActivities.length > 0) {
+          updatedActivities.unshift(...data.castActivities);
+        }
+
+        // Add to alerts logs
+        const newAlerts = [...prev.notifications];
+        if (data.directMessages && data.directMessages.length > 0) {
+          newAlerts.push(`Incoming Voice message from ${data.directMessages[0].senderName}`);
+        } else if (data.castActivities && data.castActivities.length > 0) {
+          newAlerts.push("New timeline developments surfaced.");
+        }
+
+        return {
+          ...prev,
+          directMessages: updatedDMs,
+          castActivities: updatedActivities,
+          notifications: newAlerts,
+          lastOpenedTimestamp: Date.now() // reset clock
+        };
+      });
+    } catch (e) {
+      console.warn("Reality Clock tick sync failed:", e);
+    }
+  };
+
+  const handleOnboardingComplete = (
+    profile: UserProfile, 
+    firstEpisode: Episode, 
+    characters: Character[],
+    simData?: any
+  ) => {
+    const sanitizedChars = characters.map(char => ({
+      ...char,
+      avatarUrl: getAvatarUrl(char.name, char.avatarUrl)
+    }));
+
+    const sanitizedActivities = ((firstEpisode as any).castActivities || []).map((act: any) => ({
+      ...act,
+      characterAvatar: getAvatarUrl(act.characterName, act.characterAvatar)
+    }));
+
+    const sanitizedDMs = ((firstEpisode as any).directMessages || []).map((dm: any) => ({
+      ...dm,
+      senderAvatar: getAvatarUrl(dm.senderName, dm.senderAvatar)
+    }));
+
+    // Generate initial DMs, activities, forecasts, and vaults returned during onboarding
     setState(prev => ({
       ...prev,
       profile,
       currentEpisode: firstEpisode,
-      characters,
-      systemStatus: 'dashboard'
+      characters: sanitizedChars,
+      systemStatus: 'dashboard',
+      castActivities: sanitizedActivities,
+      directMessages: sanitizedDMs,
+      vaultItems: (firstEpisode as any).vaultItems || [],
+      forecast: (firstEpisode as any).forecast || INITIAL_FORECAST,
+      notifications: ["Your timeline universe has successfully compiled."]
     }));
   };
 
@@ -80,7 +227,7 @@ export default function App() {
     const choice: Choice = aftermathResult.originalChoice;
     const nextEpisode: Episode = aftermathResult.nextEpisode;
 
-    // Mutate character vectors
+    // Mutate character metrics
     const updatedCharacters = state.characters.map(char => {
       const matchChange = aftermathResult.relationshipChanges.find(
         (change: any) => change.characterName.toLowerCase() === char.name.toLowerCase()
@@ -89,49 +236,22 @@ export default function App() {
         return {
           ...char,
           relationshipScore: Math.min(100, Math.max(-100, char.relationshipScore + matchChange.scoreDelta)),
+          currentState: matchChange.currentState || char.currentState,
+          attractionMetrics: matchChange.attractionMetrics || char.attractionMetrics,
           pastInteractions: [...char.pastInteractions, matchChange.memoryGained]
         };
       }
       return char;
     });
 
-    // Mutate reputation meters
-    const updatedReputation = { ...state.reputation };
-    Object.entries(aftermathResult.reputationChanges || {}).forEach(([key, value]) => {
-      const statKey = key as keyof typeof INITIAL_REPUTATION;
-      if (updatedReputation[statKey] !== undefined) {
-        updatedReputation[statKey] = Math.min(100, Math.max(0, updatedReputation[statKey] + (value as number)));
-      }
-    });
-
-    // Manage XP and Level progression
-    let newXp = state.xp + 35;
-    let newLevel = state.level;
-    const threshold = state.level * 100;
-    
-    if (newXp >= threshold) {
-      newXp = newXp - threshold;
-      newLevel = state.level + 1;
-      setLevelUpFanfare(newLevel);
+    // Update alerts notifications logs
+    const updatedAlerts = [...state.notifications];
+    if (aftermathResult.socialSignals) {
+      updatedAlerts.push(...aftermathResult.socialSignals);
+    } else {
+      updatedAlerts.push("Timeline shifts registered.");
     }
 
-    // Capture date tracker to evaluate active streak retention loops
-    const todayStr = new Date().toISOString().split('T')[0];
-    let newStreak = state.streak;
-    
-    if (state.lastPlayedDate && state.lastPlayedDate !== todayStr) {
-      const lastDate = new Date(state.lastPlayedDate);
-      const diffTime = Math.abs(new Date(todayStr).getTime() - lastDate.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-      if (diffDays === 1) {
-        newStreak = state.streak + 1;
-      } else if (diffDays > 1) {
-        newStreak = 1; // Streak reset
-      }
-    }
-
-    // Push into recap feeds history
     const oldEpisode = { 
       ...state.currentEpisode!, 
       userChoiceMade: choice.text 
@@ -143,44 +263,111 @@ export default function App() {
       currentEpisode: nextEpisode,
       currentDay: prev.currentDay + 1,
       characters: updatedCharacters,
-      reputation: updatedReputation,
-      xp: newXp,
-      level: newLevel,
-      streak: newStreak,
-      lastPlayedDate: todayStr,
+      forecast: aftermathResult.forecastChanges || prev.forecast,
+      notifications: updatedAlerts,
+      lastOpenedTimestamp: Date.now(),
       systemStatus: 'dashboard'
     }));
   };
 
+  const handleSendMessage = (characterId: string, text: string) => {
+    const activeChar = state.characters.find(c => c.id === characterId);
+    if (!activeChar) return;
+
+    const userMsg: DirectMessage = {
+      id: `msg-user-${Date.now()}`,
+      senderId: "user",
+      senderName: state.profile?.name || "Player",
+      senderAvatar: state.profile?.avatarUrl || "",
+      text,
+      timestamp: "Just now",
+      isRead: true
+    };
+
+    setState(prev => ({
+      ...prev,
+      directMessages: [...prev.directMessages, userMsg]
+    }));
+
+    // Simulate character delayed reply
+    setTimeout(async () => {
+      let replyText = `I noticed your message. We need to stay focused on our strategy in this timeline.`;
+      
+      try {
+        const response = await fetch('/api/perspective', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            characterName: activeChar.name,
+            activeUniverse: state.activeUniverse,
+            episodeTitle: state.currentEpisode?.title || "Timeline"
+          })
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.story) {
+            replyText = `${activeChar.name.split(' ')[0]} reports: "${data.story.slice(0, 100)}..."`;
+          }
+        }
+      } catch (e) {
+        console.warn("Dynamic reply generator failed.");
+      }
+
+      const characterReply: DirectMessage = {
+        id: `msg-char-${Date.now()}`,
+        senderId: activeChar.id,
+        senderName: activeChar.name,
+        senderAvatar: activeChar.avatarUrl,
+        text: replyText,
+        timestamp: "Just now",
+        isRead: false
+      };
+
+      setState(prev => ({
+        ...prev,
+        directMessages: [...prev.directMessages, characterReply],
+        notifications: [...prev.notifications, `New message from ${activeChar.name}`]
+      }));
+    }, 1500);
+  };
+
   const handleSelectUniverse = async (universeId: string) => {
-    if (!state.isSubscribed && universeId !== 'Original') {
+    if (!state.plotTwistBlackActive && universeId !== 'Original') {
       setState(prev => ({ ...prev, systemStatus: 'premium' }));
       return;
     }
 
-    // Show loading sequence
-    setState(prev => ({ ...prev, activeUniverse: universeId, systemStatus: 'onboarding' }));
+    // Reset parameters to compile a brand new universe timeline
+    setState(prev => ({ 
+      ...prev, 
+      activeUniverse: universeId, 
+      systemStatus: 'onboarding',
+      profile: null,
+      currentEpisode: null,
+      characters: []
+    }));
   };
 
   const triggerResetCampaign = () => {
-    if (confirm("Are you sure you want to completely clear your PlotTwist universe, user profile, and progression history?")) {
+    if (confirm("Are you sure you want to completely clear your PlotTwist universe profile and progression history?")) {
       localStorage.removeItem(LOCAL_STORAGE_KEY);
       setState({
         currentDay: 1,
         profile: null,
-        reputation: INITIAL_REPUTATION,
         characters: [],
         episodes: [],
         currentEpisode: null,
         selectedChoiceId: null,
         userChoicesHistory: {},
         systemStatus: 'onboarding',
-        xp: 0,
-        level: 1,
-        streak: 1,
-        lastPlayedDate: null,
+        lastOpenedTimestamp: Date.now(),
+        castActivities: [],
+        directMessages: [],
+        vaultItems: [],
+        forecast: INITIAL_FORECAST,
         activeUniverse: 'Original',
-        isSubscribed: false
+        plotTwistBlackActive: false,
+        notifications: []
       });
     }
   };
@@ -190,36 +377,11 @@ export default function App() {
   };
 
   const triggerEmergencyCrisis = (eventTitle: string, eventText: string) => {
-    setActiveEmergencyEvent({
-      title: eventTitle,
-      info: eventText,
-      isTriggered: true
-    });
-  };
-
-  const handleApplyEmergencyChoice = (bondScoreDelta: number) => {
-    // Select random character and adjust their relationship on emergency pop up
-    if (state.characters.length > 0) {
-      const idx = Math.floor(Math.random() * state.characters.length);
-      const target = state.characters[idx];
-      const updated = state.characters.map((c, i) => {
-        if (i === idx) {
-          return {
-            ...c,
-            relationshipScore: Math.min(100, Math.max(-100, c.relationshipScore + bondScoreDelta)),
-            pastInteractions: [...c.pastInteractions, `Incident: Choice on ${activeEmergencyEvent?.title}`]
-          };
-        }
-        return c;
-      });
-
-      setState(prev => ({
-        ...prev,
-        characters: updated,
-        streak: prev.streak + 1 // Rewarded by interaction!
-      }));
-    }
-    setActiveEmergencyEvent(null);
+    // Append to alerts logs
+    setState(prev => ({
+      ...prev,
+      notifications: [...prev.notifications, `Timeline alert: ${eventTitle}`]
+    }));
   };
 
   return (
@@ -241,10 +403,12 @@ export default function App() {
             exit={{ opacity: 0 }}
           >
             <Onboarding 
-              onComplete={handleOnboardingComplete} 
+              onComplete={(prof, firstEp, chars) => {
+                // If the onboard API also returned activities/messages, pass them along
+                handleOnboardingComplete(prof, firstEp, chars);
+              }} 
               isLoading={state.currentEpisode !== null && state.characters.length > 0 && state.profile !== null}
               setIsLoading={(val) => {
-                // Clear state if we are beginning a new onboarding
                 if (val) {
                   setState(prev => ({
                     ...prev,
@@ -270,8 +434,10 @@ export default function App() {
               state={state}
               onPlayEpisode={() => setState(prev => ({ ...prev, systemStatus: 'playing' }))}
               onSelectUniverse={handleSelectUniverse}
-              triggerEmergencyEvent={triggerEmergencyCrisis}
+              onSendMessage={handleSendMessage}
+              onFastForwardTime={triggerClockTick}
               setView={(view) => setState(prev => ({ ...prev, systemStatus: view }))}
+              onReset={triggerResetCampaign}
             />
           </motion.div>
         )}
@@ -289,7 +455,7 @@ export default function App() {
               episode={state.currentEpisode}
               onChoiceSelected={handleChoiceSelected}
               onClose={() => setState(prev => ({ ...prev, systemStatus: 'dashboard' }))}
-              isSubscribed={state.isSubscribed}
+              isSubscribed={state.plotTwistBlackActive}
               setView={(view) => setState(prev => ({ ...prev, systemStatus: view }))}
             />
           </motion.div>
@@ -304,8 +470,8 @@ export default function App() {
             exit={{ opacity: 0 }}
           >
             <SubscriptionModal 
-              onSubscribe={() => setState(prev => ({ ...prev, isSubscribed: true }))}
-              isSubscribed={state.isSubscribed}
+              onSubscribe={() => setState(prev => ({ ...prev, plotTwistBlackActive: true }))}
+              isSubscribed={state.plotTwistBlackActive}
               onClose={() => setState(prev => ({ ...prev, systemStatus: 'dashboard' }))}
             />
           </motion.div>
@@ -324,94 +490,12 @@ export default function App() {
               onUpdateState={handleStateMutation}
               onClose={() => setState(prev => ({ ...prev, systemStatus: 'dashboard' }))}
               onForceEvent={triggerEmergencyCrisis}
+              onFastForwardTime={triggerClockTick}
             />
           </motion.div>
         )}
 
       </AnimatePresence>
-
-      {/* FLOATING LEVEL UP PROGRESS CELEBRATION */}
-      {levelUpFanfare !== null && (
-        <div id="level_fanfare_modal" className="fixed inset-0 flex items-center justify-center bg-black/80 z-60 px-4">
-          <motion.div 
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="bg-zinc-900 border border-amber-500 rounded-3xl p-8 max-w-sm w-full text-center space-y-6 glow-ambient"
-          >
-            <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 text-yellow-400 text-3xl flex items-center justify-center rounded-full mx-auto animate-bounce">
-              🎖️
-            </div>
-            <div className="space-y-1">
-              <span className="font-mono text-[9px] tracking-widest text-amber-500 uppercase font-bold">Show Level Unlocked</span>
-              <h3 className="text-2xl font-display font-black text-white uppercase tracking-tight">Level {levelUpFanfare}!</h3>
-              <p className="text-xs text-zinc-400">
-                Congratulations, your TV-protagonist character rating has evolved. You earned new status!
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setLevelUpFanfare(null)}
-              className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-mono text-xs uppercase tracking-widest font-black rounded-xl transition-all cursor-pointer"
-            >
-              Continue Play
-            </button>
-          </motion.div>
-        </div>
-      )}
-
-      {/* EMERGENCY CRISIS POPUP DIALOG */}
-      {activeEmergencyEvent?.isTriggered && (
-        <div id="emergency_dialog_backdrop" className="fixed inset-0 flex items-center justify-center bg-black/90 z-60 px-4">
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0, rotate: -2 }}
-            animate={{ scale: 1, opacity: 1, rotate: 0 }}
-            className="bg-gradient-to-br from-zinc-950 via-zinc-950 to-red-950/20 border-2 border-red-500 rounded-3xl p-6 max-w-md w-full space-y-6 shadow-2xl relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/10 rounded-full blur-2xl pointer-events-none" />
-
-            <div className="flex gap-3">
-              <span className="text-3xl">🚨</span>
-              <div>
-                <span className="font-mono text-[9px] text-red-500 font-black uppercase tracking-widest block">EMERGENCY STORY INTERRUPT</span>
-                <h3 className="text-xl font-display font-black text-white">{activeEmergencyEvent.title}</h3>
-              </div>
-            </div>
-
-            <p className="text-sm font-sans text-zinc-300 leading-relaxed italic">
-              "{activeEmergencyEvent.info}"
-            </p>
-
-            <div className="space-y-2">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block">Crisis Choices:</span>
-              
-              <button
-                type="button"
-                onClick={() => handleApplyEmergencyChoice(15)}
-                className="w-full text-left p-3.5 bg-zinc-900 border border-zinc-805 rounded-xl text-xs hover:bg-zinc-850 hover:border-red-500/30 font-semibold text-white transition-all flex items-center justify-between"
-              >
-                <span>Assertively push back and claim black-ledger files are doctored.</span>
-                <span className="text-[10px] text-zinc-500 font-mono shrink-0">+15% Bond</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleApplyEmergencyChoice(-15)}
-                className="w-full text-left p-3.5 bg-zinc-900 border border-zinc-805 rounded-xl text-xs hover:bg-zinc-850 hover:border-red-500/30 font-semibold text-white transition-all flex items-center justify-between"
-              >
-                <span>Ignore the trap and completely double-cross their alliance.</span>
-                <span className="text-[10px] text-zinc-500 font-mono shrink-0">-15% Bond</span>
-              </button>
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <span className="font-mono text-[9px] text-red-500 uppercase tracking-widest animate-pulse">
-                • DECIDE AND SURVIVE
-              </span>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
     </div>
   );
 }
