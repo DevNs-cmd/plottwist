@@ -114,6 +114,24 @@ function getPortraitUrl(name: string): string {
   return "/portraits/sloane_cross.png";
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 7500): Promise<T> {
+  let timeoutId: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timeoutId!);
+    return result;
+  } catch (err) {
+    clearTimeout(timeoutId!);
+    throw err;
+  }
+}
+
 const LOCAL_UNIVERSES_DATA: Record<string, {
   characterA: { name: string; archetype: string; description: string; chemistry: any; pastInteractions: string[] };
   characterB: { name: string; archetype: string; description: string; chemistry: any; pastInteractions: string[] };
@@ -758,8 +776,8 @@ Generate:
    - Choices: Exactly 3 highly divergent choice pathways. One must appeal to charisma, one to intelligence/strategy, one to mystery/stealth. Include their forecastImpact (careerPotential, socialInfluence, relationshipStability, value delta from -20 to 20) and relationshipImpact. Make the relationshipImpact object contain keys corresponding EXACTLY to the names of the characters created above (e.g., {"CharacterName": 10}).
 `;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response: any = await withTimeout(ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -842,7 +860,7 @@ Generate:
           required: ["summary", "characters", "firstEpisode"]
         }
       }
-    });
+    }), 7500);
 
     const data = JSON.parse(response.text || "{}");
     
@@ -944,8 +962,8 @@ TASK:
 Strict JSON Output format matching standard schema.
 `;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response: any = await withTimeout(ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -1026,7 +1044,7 @@ Strict JSON Output format matching standard schema.
           required: ["consequentialStoryReaction", "characterImpactSummary", "relationshipChanges", "forecastChanges", "socialSignals", "nextEpisode"]
         }
       }
-    });
+    }), 7500);
 
     const data = JSON.parse(response.text || "{}");
     res.json(data);
@@ -1075,10 +1093,10 @@ app.post("/api/perspective", async (req, res) => {
     }
 
     const prompt = `Rewrite the starting scene of episode "${episodeTitle}" entirely from the perspective, inner thoughts, biases, and emotional triggers of the character "${characterName}". Make it highly narrative and cinematic.`;
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response: any = await withTimeout(ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: prompt
-    });
+    }), 7500);
 
     res.json({ story: response.text });
   } catch (error) {
@@ -1100,10 +1118,10 @@ app.post("/api/motivation", async (req, res) => {
     }
 
     const prompt = `Expose the hidden social signals, underlying attraction vectors, and secret motivations of the characters in the episode "${episodeTitle}" during choice index "${choiceId}". Keep it brief, analytic, and premium.`;
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response: any = await withTimeout(ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: prompt
-    });
+    }), 7500);
     res.json({ motivation: response.text });
   } catch (error) {
     res.json({ motivation: SimulationEngine.motivation(req.body) });
@@ -1124,10 +1142,10 @@ app.post("/api/intelligence", async (req, res) => {
     }
 
     const prompt = `Write a premium intelligence report detailing the attraction dynamics, value alignments, communication preferences, and alliance forecast between the protagonist and ${characterName}. Format in elegant Markdown.`;
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response: any = await withTimeout(ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: prompt
-    });
+    }), 7500);
     res.json({ intelligence: response.text });
   } catch (error) {
     res.json({ intelligence: SimulationEngine.intelligence(req.body) });
@@ -1154,8 +1172,8 @@ app.post("/api/voice", async (req, res) => {
     const prompt = `Read this narrative beat with high TV drama narration flair, maintaining serious cinematic timing and breathing:
 "${text}"`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-tts-preview",
+    const response: any = await withTimeout(ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseModalities: ["AUDIO"],
@@ -1165,7 +1183,7 @@ app.post("/api/voice", async (req, res) => {
           },
         },
       },
-    });
+    }), 7500);
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Audio) {
