@@ -5,7 +5,6 @@
 
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -859,10 +858,18 @@ Generate:
     const universeKey = activeUniverse === "Founder" ? "Founder" : "Original";
     const simOnboardData = SimulationEngine.onboard({ ...req.body, activeUniverse: universeKey });
 
+    const firstEpisode = data.firstEpisode || simOnboardData.firstEpisode;
+    if (firstEpisode) {
+      firstEpisode.castActivities = simOnboardData.castActivities;
+      firstEpisode.directMessages = simOnboardData.directMessages;
+      firstEpisode.vaultItems = simOnboardData.vaultItems;
+      firstEpisode.forecast = simOnboardData.forecast;
+    }
+
     res.json({
       summary: data.summary || simOnboardData.summary,
       characters: data.characters || simOnboardData.characters,
-      firstEpisode: data.firstEpisode || simOnboardData.firstEpisode,
+      firstEpisode: firstEpisode,
       forecast: simOnboardData.forecast,
       vaultItems: simOnboardData.vaultItems,
       directMessages: simOnboardData.directMessages,
@@ -1176,6 +1183,7 @@ app.post("/api/voice", async (req, res) => {
 // Configure Vite middleware for development or Static Asset serving for production
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
